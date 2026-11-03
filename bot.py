@@ -76,7 +76,7 @@ async def get_player_stats(nickname: str):
             a.id, a.name, a.level, a.money, a.bank,
             a.admin, a.family_id, a.family_rang,
             a.online, a.last_login, a.reg_time,
-            a.donate_current, a.coins, a.moneti,
+            a.donate_current, a.donate_total, a.coins, a.moneti,
             a.premium, a.warn, a.mute, a.jail,
             (SELECT COUNT(*) FROM ownable_cars WHERE owner_id = a.id) AS cars_count,
             (SELECT COUNT(*) FROM business WHERE owner_id = a.id) AS business_count,
@@ -143,7 +143,8 @@ async def stats_handler(message: types.Message):
         f"🔹 Уровень: {player.get('level', '—')}\n"
         f"💰 Деньги: {fmt_money(player.get('money'))} $\n"
         f"🏦 Банк: {fmt_money(player.get('bank'))} $\n"
-        f"💎 Донат: {player.get('donate_current', 0)}\n"
+        f"💎 Донат доступно: {player.get('donate_current', 0)}\n"
+        f"📈 Донат всего зачислено: {player.get('donate_total', 0)}\n"
         f"🪙 Coins: {player.get('coins', 0)} | Moneti: {player.get('moneti', 0)}\n"
         f"🚗 Автопарк: {player.get('cars_count', 0)} машин\n"
         f"🏢 Бизнесов: {player.get('business_count', 0)}\n"
