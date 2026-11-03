@@ -62,7 +62,6 @@ def fmt_date(value) -> str:
     if value is None:
         return "—"
     try:
-        # Game timestamps are Unix timestamps; display them in UTC explicitly.
         return datetime.fromtimestamp(int(value), tz=timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
     except (ValueError, TypeError, OverflowError, OSError):
         return "—"
@@ -93,7 +92,6 @@ async def get_player_stats(nickname: str):
                 await cur.execute(sql, (nickname,))
                 return await cur.fetchone()
     except Exception as exc:
-        # Keep player input out of logs and distinguish SQL/schema failures from "not found".
         logger.exception("Ошибка выполнения запроса статистики игрока")
         raise DatabaseQueryError from exc
 
@@ -158,14 +156,28 @@ async def stats_handler(message: types.Message):
         f"📅 Регистрация: {fmt_date(player.get('reg_time'))}\n"
         f"🕐 Последний вход: {fmt_date(player.get('last_login'))}"
     )
-    # Plain text is intentional: database values may contain Markdown characters.
     await message.answer(response)
+
+
+@dp.errors()
+async def global_error_handler(event):
+    logger.exception("Необработанная ошибка при обработке Telegram update", exc_info=event.exception)
+    return True
 
 
 async def on_startup(bot: Bot):
     global db_pool
-    logger.info("Создание пула соединений с MySQL...")
+    logger.info("Запуск приложения. URL вебхука: %s", WEBHOOK_URL)
+
     try:
+        me = await bot.get_me()
+        logger.info("Telegram bot identity: id=%s username=@%s", me.id, me.username or "без_username")
+    except Exception:
+        logger.exception("Не удалось получить информацию о Telegram-боте")
+        raise
+
+    try:
+        logger.info("Создание пула соединений с MySQL...")
         db_pool = await aiomysql.create_pool(
             host=DB_HOST,
             port=DB_PORT,
@@ -178,24 +190,37 @@ async def on_startup(bot: Bot):
             connect_timeout=10,
             charset="utf8mb4",
         )
-        # Verify connectivity now, so connection failures appear in startup logs.
         async with db_pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1")
                 await cur.fetchone()
         logger.info("Подключение к MySQL проверено.")
     except Exception:
-        logger.exception("Не удалось подключиться к MySQL")
+        logger.exception("MySQL недоступен; команды /start продолжат работать, статистика временно недоступна")
         if db_pool is not None:
             db_pool.close()
             await db_pool.wait_closed()
             db_pool = None
 
-    # Do not delete the webhook during shutdown: during zero-downtime deploy an
-    # old instance could otherwise remove the webhook just registered by the new one.
+    # Preserve queued updates; never silently discard messages on redeploy.
     logger.info("Установка вебхука Telegram...")
-    await bot.set_webhook(WEBHOOK_URL, allowed_updates=dp.resolve_used_update_types())
-    logger.info("Вебхук установлен.")
+    await bot.set_webhook(
+        WEBHOOK_URL,
+        allowed_updates=dp.resolve_used_update_types(),
+        drop_pending_updates=False,
+    )
+    info = await bot.get_webhook_info()
+    logger.info(
+        "Webhook status: url_configured=%s pending_updates=%s "
+        "last_error_date=%s last_error_message=%s",
+        bool(info.url),
+        info.pending_update_count,
+        info.last_error_date,
+        info.last_error_message,
+    )
+    if not info.url:
+        raise RuntimeError("Telegram не подтвердил установку вебхука")
+    logger.info("Вебхук установлен и проверен.")
 
 
 async def on_shutdown(bot: Bot):
@@ -205,23 +230,30 @@ async def on_shutdown(bot: Bot):
         await db_pool.wait_closed()
         db_pool = None
         logger.info("Пул соединений MySQL закрыт.")
-    # Deliberately leave the webhook configured for the next Render instance.
+    logger.info("Экземпляр приложения останавливается; вебхук оставлен для следующего запуска.")
+
+
+async def health(_request):
+    return web.json_response({"status": "ok"})
 
 
 def main():
     app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
-    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    # Wait for the update handler to finish before acknowledging Telegram.
+    # This allows Telegram to retry delivery if processing fails.
+    webhook_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        handle_in_background=False,
+    )
     webhook_handler.register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
-
-    async def health(_request):
-        return web.Response(text="OK")
-
-    app.router.add_get("/health", health)
 
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
