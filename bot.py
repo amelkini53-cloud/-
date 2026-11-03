@@ -364,7 +364,11 @@ async def on_startup(bot: Bot):
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1")
                 await cur.fetchone()
-        logger.info("Подключение к MySQL проверено.")\n        await ensure_shop_schema(db_pool)\n        logger.info("Таблица заявок магазина проверена.")
+        logger.info("Подключение к MySQL проверено.")\n        try:
+            await ensure_shop_schema(db_pool)
+            logger.info("Таблица заявок магазина проверена.")
+        except Exception:
+            logger.exception("Не удалось создать таблицу магазина; статистика продолжит работать")\n        logger.info("Таблица заявок магазина проверена.")
     except Exception:
         logger.exception("MySQL недоступен; команды /start продолжат работать, статистика временно недоступна")
         if db_pool is not None:
