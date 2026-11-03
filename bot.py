@@ -96,6 +96,175 @@ async def get_player_stats(nickname: str):
         raise DatabaseQueryError from exc
 
 
+
+SHOP_CATEGORIES = {
+    "donate": "Донат",
+    "virts": "Вирты",
+    "car": "Машина",
+    "house": "Дом",
+    "business": "Бизнес",
+    "other": "Другое",
+}
+
+
+async def ensure_shop_schema(pool):
+    sql = """
+        CREATE TABLE IF NOT EXISTS bot_shop_orders (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            telegram_user_id BIGINT NOT NULL,
+            telegram_username VARCHAR(64) NOT NULL DEFAULT '',
+            game_nick VARCHAR(24) NOT NULL,
+            category VARCHAR(16) NOT NULL,
+            description VARCHAR(255) NOT NULL DEFAULT '',
+            status VARCHAR(24) NOT NULL DEFAULT 'pending_review',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_shop_user (telegram_user_id, id),
+            KEY idx_shop_status (status, id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+        await conn.commit()
+
+
+@dp.message(Command("shop"))
+async def shop_handler(message: types.Message):
+    await message.answer(
+        "🛒 Магазин сервера\\n"
+        "Сейчас доступно оформление заявок (тестовый режим, без реального списания денег).\\n\\n"
+        "Категории: донат, вирты, машина, дом, бизнес.\\n"
+        "Формат заявки:\\n"
+        "/order категория игровой_ник описание\\n\\n"
+        "Пример: /order car Player_Name BMW M5\\n"
+        "Статус заявок: /myorders\\n"
+        "Цены и автоматическая выдача будут включены после проверки игровых правил выдачи."
+    )
+
+
+@dp.message(Command("order"))
+async def order_handler(message: types.Message):
+    if db_pool is None:
+        await message.answer("База данных магазина пока недоступна.")
+        return
+    parts = (message.text or "").split(maxsplit=3)
+    if len(parts) < 3:
+        await message.answer(
+            "Формат: /order категория игровой_ник описание\\n"
+            "Категории: donate, virts, car, house, business, other."
+        )
+        return
+    category = parts[1].lower()
+    nickname = parts[2].strip()
+    description = parts[3].strip() if len(parts) > 3 else ""
+    if category not in SHOP_CATEGORIES:
+        await message.answer("Неизвестная категория. Используй /shop.")
+        return
+    if not nickname or len(nickname) > 24 or len(description) > 255:
+        await message.answer("Проверь ник (до 24 символов) и описание (до 255 символов).")
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO bot_shop_orders
+                        (telegram_user_id, telegram_username, game_nick, category, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        message.from_user.id,
+                        (message.from_user.username or "")[:64],
+                        nickname,
+                        category,
+                        description,
+                    ),
+                )
+                order_id = cur.lastrowid
+            await conn.commit()
+        await message.answer(
+            f"Заявка #{order_id} создана.\\n"
+            f"Категория: {SHOP_CATEGORIES[category]}\\n"
+            f"Игровой ник: {nickname}\\n"
+            "Статус: ожидает проверки. Это пока не оплата и не выдача."
+        )
+    except Exception:
+        logger.exception("Не удалось создать заявку магазина")
+        await message.answer("Не удалось создать заявку. Попробуй позже.")
+
+
+@dp.message(Command("myorders"))
+async def my_orders_handler(message: types.Message):
+    if db_pool is None:
+        await message.answer("База данных магазина пока недоступна.")
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT id, category, game_nick, description, status, created_at
+                    FROM bot_shop_orders
+                    WHERE telegram_user_id = %s
+                    ORDER BY id DESC
+                    LIMIT 10
+                    """,
+                    (message.from_user.id,),
+                )
+                rows = await cur.fetchall()
+        if not rows:
+            await message.answer("У тебя пока нет заявок.")
+            return
+        lines = ["📦 Последние заявки:"]
+        for row in rows:
+            category = SHOP_CATEGORIES.get(row["category"], row["category"])
+            lines.append(
+                f"#{row['id']} · {category} · {row['game_nick']} · "
+                f"{row['status']} · {row['description'][:70]}"
+            )
+        await message.answer("\\n".join(lines))
+    except Exception:
+        logger.exception("Не удалось получить заявки пользователя")
+        await message.answer("Не удалось загрузить заявки. Попробуй позже.")
+
+
+@dp.message(Command("paydemo"))
+async def demo_payment_handler(message: types.Message):
+    if db_pool is None:
+        await message.answer("База данных магазина пока недоступна.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Формат: /paydemo номер_заявки")
+        return
+    order_id = int(parts[1])
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE bot_shop_orders
+                    SET status = 'demo_paid'
+                    WHERE id = %s AND telegram_user_id = %s AND status = 'pending_review'
+                    """,
+                    (order_id, message.from_user.id),
+                )
+                changed = cur.rowcount
+            await conn.commit()
+        if changed:
+            await message.answer(
+                f"Тестовая оплата заявки #{order_id} отмечена.\\n"
+                "Реальные деньги не списаны, игровые балансы и имущество не изменены."
+            )
+        else:
+            await message.answer("Заявка не найдена, уже обработана или принадлежит другому пользователю.")
+    except Exception:
+        logger.exception("Не удалось отметить тестовую оплату")
+        await message.answer("Не удалось выполнить тестовую оплату. Попробуй позже.")
+
+
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     first_name = message.from_user.first_name if message.from_user else "игрок"
@@ -195,7 +364,7 @@ async def on_startup(bot: Bot):
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1")
                 await cur.fetchone()
-        logger.info("Подключение к MySQL проверено.")
+        logger.info("Подключение к MySQL проверено.")\n        await ensure_shop_schema(db_pool)\n        logger.info("Таблица заявок магазина проверена.")
     except Exception:
         logger.exception("MySQL недоступен; команды /start продолжат работать, статистика временно недоступна")
         if db_pool is not None:
