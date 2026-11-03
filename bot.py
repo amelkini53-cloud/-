@@ -133,13 +133,13 @@ async def ensure_shop_schema(pool):
 @dp.message(Command("shop"))
 async def shop_handler(message: types.Message):
     await message.answer(
-        "🛒 Магазин сервера\\n"
-        "Сейчас доступно оформление заявок (тестовый режим, без реального списания денег).\\n\\n"
-        "Категории: донат, вирты, машина, дом, бизнес.\\n"
-        "Формат заявки:\\n"
-        "/order категория игровой_ник описание\\n\\n"
-        "Пример: /order car Player_Name BMW M5\\n"
-        "Статус заявок: /myorders\\n"
+        "🛒 Магазин сервера\n"
+        "Сейчас доступно оформление заявок (тестовый режим, без реального списания денег).\n\n"
+        "Категории: донат, вирты, машина, дом, бизнес.\n"
+        "Формат заявки:\n"
+        "/order категория игровой_ник описание\n\n"
+        "Пример: /order car Player_Name BMW M5\n"
+        "Статус заявок: /myorders\n"
         "Цены и автоматическая выдача будут включены после проверки игровых правил выдачи."
     )
 
@@ -152,7 +152,7 @@ async def order_handler(message: types.Message):
     parts = (message.text or "").split(maxsplit=3)
     if len(parts) < 3:
         await message.answer(
-            "Формат: /order категория игровой_ник описание\\n"
+            "Формат: /order категория игровой_ник описание\n"
             "Категории: donate, virts, car, house, business, other."
         )
         return
@@ -185,9 +185,9 @@ async def order_handler(message: types.Message):
                 order_id = cur.lastrowid
             await conn.commit()
         await message.answer(
-            f"Заявка #{order_id} создана.\\n"
-            f"Категория: {SHOP_CATEGORIES[category]}\\n"
-            f"Игровой ник: {nickname}\\n"
+            f"Заявка #{order_id} создана.\n"
+            f"Категория: {SHOP_CATEGORIES[category]}\n"
+            f"Игровой ник: {nickname}\n"
             "Статус: ожидает проверки. Это пока не оплата и не выдача."
         )
     except Exception:
@@ -224,7 +224,7 @@ async def my_orders_handler(message: types.Message):
                 f"#{row['id']} · {category} · {row['game_nick']} · "
                 f"{row['status']} · {row['description'][:70]}"
             )
-        await message.answer("\\n".join(lines))
+        await message.answer("\n".join(lines))
     except Exception:
         logger.exception("Не удалось получить заявки пользователя")
         await message.answer("Не удалось загрузить заявки. Попробуй позже.")
@@ -255,7 +255,7 @@ async def demo_payment_handler(message: types.Message):
             await conn.commit()
         if changed:
             await message.answer(
-                f"Тестовая оплата заявки #{order_id} отмечена.\\n"
+                f"Тестовая оплата заявки #{order_id} отмечена.\n"
                 "Реальные деньги не списаны, игровые балансы и имущество не изменены."
             )
         else:
