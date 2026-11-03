@@ -72,7 +72,7 @@ async def get_player_stats(nickname: str):
 async def start_handler(message: types.Message):
     await message.answer(
         f"Привет, {message.from_user.first_name}! 👋\n"
-        "Отправь мне **ник игрока** (как в игре), и я покажу его профиль."
+        "Отправь мне ник игрока (как в игре), и я покажу его профиль."
     )
 
 
@@ -85,7 +85,7 @@ async def stats_handler(message: types.Message):
     player = await get_player_stats(nickname)
 
     if not player:
-        await message.answer(f"❌ Игрок с ником **{nickname}** не найден.")
+        await message.answer(f"❌ Игрок с ником {nickname} не найден.")
         return
 
     admin_status = f"✅ Да (уровень {player['admin']})" if player.get("admin") else "❌ Нет"
@@ -99,26 +99,27 @@ async def stats_handler(message: types.Message):
     premium_status = "✅ Есть" if player.get("premium") else "❌ Нет"
 
     text = (
-        f"👤 **{player['name']}**\n"
+        f"👤 {player['name']}\n"
         f"{online_status}\n\n"
-        f"🔹 **Уровень:** {player['level']}\n"
-        f"💰 **Деньги:** {fmt_money(player['money'])} $\n"
-        f"🏦 **Банк:** {fmt_money(player['bank'])} $\n"
-        f"💎 **Донат:** {player.get('donate_current', 0)}\n"
-        f"🪙 **Coins:** {player.get('coins', 0)} | **Moneti:** {player.get('moneti', 0)}\n"
-        f"🚗 **Автопарк:** {player['cars_count']} машин\n"
-        f"🏢 **Бизнесов:** {player['business_count']}\n"
-        f"🏠 **Домов:** {player['houses_count']}\n"
-        f"👨‍👩‍👧 **Семья:** {family_info}\n"
-        f"🛡️ **Админ:** {admin_status}\n"
-        f"⭐ **Premium:** {premium_status}\n\n"
-        f"⚠️ **Варны:** {player.get('warn', 0)} | 🔇 **Мут:** {player.get('mute', 0)}\n"
-        f"🚔 **Джейл:** {'Да' if player.get('jail') else 'Нет'}\n\n"
-        f"📅 **Регистрация:** {fmt_date(player.get('reg_time'))}\n"
-        f"🕐 **Последний вход:** {fmt_date(player.get('last_login'))}"
+        f"🔹 Уровень: {player['level']}\n"
+        f"💰 Деньги: {fmt_money(player['money'])} $\n"
+        f"🏦 Банк: {fmt_money(player['bank'])} $\n"
+        f"💎 Донат: {player.get('donate_current', 0)}\n"
+        f"🪙 Coins: {player.get('coins', 0)} | Moneti: {player.get('moneti', 0)}\n"
+        f"🚗 Автопарк: {player['cars_count']} машин\n"
+        f"🏢 Бизнесов: {player['business_count']}\n"
+        f"🏠 Домов: {player['houses_count']}\n"
+        f"👨‍👩‍👧 Семья: {family_info}\n"
+        f"🛡️ Админ: {admin_status}\n"
+        f"⭐ Premium: {premium_status}\n\n"
+        f"⚠️ Варны: {player.get('warn', 0)} | 🔇 Мут: {player.get('mute', 0)}\n"
+        f"🚔 Джейл: {'Да' if player.get('jail') else 'Нет'}\n\n"
+        f"📅 Регистрация: {fmt_date(player.get('reg_time'))}\n"
+        f"🕐 Последний вход: {fmt_date(player.get('last_login'))}"
     )
 
-    await message.answer(text, parse_mode="Markdown")
+    # Plain text avoids Telegram Markdown parsing errors from player/database values.
+    await message.answer(text)
 
 
 async def on_startup(bot: Bot):
