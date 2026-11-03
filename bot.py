@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import aiomysql
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
@@ -130,17 +131,54 @@ async def ensure_shop_schema(pool):
         await conn.commit()
 
 
+def main_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🛒 Магазин"), KeyboardButton(text="📦 Мои заявки")],
+            [KeyboardButton(text="📊 Проверить игрока")],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выбери действие",
+    )
+
+
+def shop_inline_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Донат", callback_data="shop:donate"),
+         InlineKeyboardButton(text="💰 Вирты", callback_data="shop:virts")],
+        [InlineKeyboardButton(text="🚗 Машина", callback_data="shop:car"),
+         InlineKeyboardButton(text="🏠 Дом", callback_data="shop:house")],
+        [InlineKeyboardButton(text="🏢 Бизнес", callback_data="shop:business"),
+         InlineKeyboardButton(text="📦 Другое", callback_data="shop:other")],
+        [InlineKeyboardButton(text="📋 Мои заявки", callback_data="shop:orders")],
+    ])
+
+
 @dp.message(Command("shop"))
+@dp.message(lambda message: (message.text or "") == "🛒 Магазин")
 async def shop_handler(message: types.Message):
     await message.answer(
-        "🛒 Магазин сервера\n"
-        "Сейчас доступно оформление заявок (тестовый режим, без реального списания денег).\n\n"
-        "Категории: донат, вирты, машина, дом, бизнес.\n"
-        "Формат заявки:\n"
-        "/order категория игровой_ник описание\n\n"
-        "Пример: /order car Player_Name BMW M5\n"
-        "Статус заявок: /myorders\n"
-        "Цены и автоматическая выдача будут включены после проверки игровых правил выдачи."
+        "🛒 Магазин сервера\\nВыбери категорию. Сейчас это тестовые заявки: оплаты и выдачи нет.",
+        reply_markup=shop_inline_keyboard(),
+    )
+
+
+@dp.callback_query(lambda query: (query.data or "").startswith("shop:"))
+async def shop_callback_handler(query: types.CallbackQuery):
+    action = query.data.split(":", 1)[1]
+    await query.answer()
+    if action == "orders":
+        await my_orders_handler(query.message)
+        return
+    category = SHOP_CATEGORIES.get(action)
+    if not category:
+        await query.message.answer("Неизвестная категория. Открой /shop.")
+        return
+    await query.message.answer(
+        f"Выбрана категория: {category}.\\n"
+        f"Отправь заявку командой:\\n/order {action} ТВОЙ_НИК описание\\n"
+        "Например: /order car Player_Name BMW M5\\n"
+        "Это заявка, не оплата и не выдача."
     )
 
 
@@ -269,9 +307,20 @@ async def demo_payment_handler(message: types.Message):
 async def start_handler(message: types.Message):
     first_name = message.from_user.first_name if message.from_user else "игрок"
     await message.answer(
-        f"Привет, {first_name}! 👋\n"
-        "Отправь игровой ник (до 24 символов), и я покажу статистику игрока."
+        f"Привет, {first_name}! 👋\\n"
+        "Выбери действие в меню или отправь игровой ник для просмотра статистики.",
+        reply_markup=main_menu_keyboard(),
     )
+
+
+@dp.message(lambda message: (message.text or "") == "📦 Мои заявки")
+async def my_orders_button_handler(message: types.Message):
+    await my_orders_handler(message)
+
+
+@dp.message(lambda message: (message.text or "") == "📊 Проверить игрока")
+async def stats_prompt_handler(message: types.Message):
+    await message.answer("Отправь игровой ник отдельным сообщением.")
 
 
 @dp.message()
